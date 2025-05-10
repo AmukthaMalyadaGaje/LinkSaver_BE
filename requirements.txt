@@ -10,3 +10,4 @@ python-dotenv==1.0.1
 pydantic==2.6.1
 pydantic-settings==2.1.0
 python-jose[cryptography]==3.3.0
+httpx==0.25.0
