@@ -11,9 +11,12 @@ from bson import ObjectId
 import urllib.parse
 import httpx
 import os
+import dotenv
 
 # Initialize FastAPI app
 app = FastAPI()
+
+dotenv.load_dotenv()
 
 # CORS middleware configuration
 app.add_middleware(
@@ -30,37 +33,45 @@ ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 
 # MongoDB configuration
-MONGO_URL = "mongodb://localhost:27017"
+MONGO_URL = dotenv.dotenv_values(".env")["MONGODB_URL"]
+
 db_client = AsyncIOMotorClient(MONGO_URL)
+print(db_client)
 db = db_client.linksaver_db
 
 # Password hashing
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
+
 # Helper function to convert ObjectId to string
 def serialize_document(doc):
-    if doc.get('_id'):
-        doc['_id'] = str(doc['_id'])
-    if doc.get('user_id'):
-        doc['user_id'] = str(doc['user_id'])
+    if doc.get("_id"):
+        doc["_id"] = str(doc["_id"])
+    if doc.get("user_id"):
+        doc["user_id"] = str(doc["user_id"])
     return doc
+
 
 # Pydantic models
 class Token(BaseModel):
     access_token: str
     token_type: str
 
+
 class TokenData(BaseModel):
     username: Optional[str] = None
+
 
 class User(BaseModel):
     email: str
     hashed_password: str
 
+
 class UserCreate(BaseModel):
     email: str
     password: str
+
 
 class Bookmark(BaseModel):
     url: HttpUrl
@@ -70,16 +81,20 @@ class Bookmark(BaseModel):
     created_at: datetime = datetime.now()
     tags: List[str] = []
 
+
 class BookmarkCreate(BaseModel):
     url: HttpUrl
     summary: Optional[str] = None
+
 
 # Helper functions
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
 
+
 def get_password_hash(password):
     return pwd_context.hash(password)
+
 
 def create_access_token(data: dict):
     to_encode = data.copy()
@@ -87,6 +102,7 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
+
 
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     credentials_exception = HTTPException(
@@ -107,25 +123,23 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise credentials_exception
     return serialize_document(user)
 
+
 # Authentication endpoints
 @app.post("/register")
 async def register_user(user: UserCreate):
     existing_user = await db.users.find_one({"email": user.email})
     if existing_user:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered"
         )
 
     hashed_password = get_password_hash(user.password)
-    user_dict = {
-        "email": user.email,
-        "hashed_password": hashed_password
-    }
+    user_dict = {"email": user.email, "hashed_password": hashed_password}
 
     result = await db.users.insert_one(user_dict)
     user_dict["_id"] = result.inserted_id
     return {"message": "User registered successfully", "status": "success"}
+
 
 @app.post("/token", response_model=Token)
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
@@ -139,9 +153,12 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     access_token = create_access_token(data={"sub": form_data.username})
     return {"access_token": access_token, "token_type": "bearer"}
 
+
 # Bookmark endpoints
 @app.post("/bookmarks")
-async def create_bookmark(bookmark: BookmarkCreate, current_user: dict = Depends(get_current_user)):
+async def create_bookmark(
+    bookmark: BookmarkCreate, current_user: dict = Depends(get_current_user)
+):
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(str(bookmark.url))
@@ -154,7 +171,7 @@ async def create_bookmark(bookmark: BookmarkCreate, current_user: dict = Depends
                 "summary": bookmark.summary or "Summary unavailable",
                 "user_id": ObjectId(current_user["_id"]),
                 "created_at": datetime.now(),
-                "tags": []
+                "tags": [],
             }
 
             result = await db.bookmarks.insert_one(bookmark_data)
@@ -165,8 +182,9 @@ async def create_bookmark(bookmark: BookmarkCreate, current_user: dict = Depends
         except Exception as e:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Error processing URL: {str(e)}"
+                detail=f"Error processing URL: {str(e)}",
             )
+
 
 @app.get("/bookmarks")
 async def get_bookmarks(current_user: dict = Depends(get_current_user)):
@@ -176,6 +194,8 @@ async def get_bookmarks(current_user: dict = Depends(get_current_user)):
         bookmarks.append(serialize_document(bookmark))
     return bookmarks
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)
